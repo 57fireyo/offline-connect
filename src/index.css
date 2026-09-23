@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-tactical: #090D12;
+    --surface-tactical: #111822;
+    --surface-variant: #1B2636;
+    --surface-highlight: #243348;
+    --amber-emergency: #F59E0B;
+    --green-tactical: #10B981;
+    --red-distress: #EF4444;
+    --cyan-radio: #06B6D4;
+    --border-subtle: #26354A;
+  }
+}
+
+body {
+  background-color: #090D12;
+  color: #F9FAFB;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Monospace font utility for tactical data displays */
+.font-mono-tactical {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Custom Tactical Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #090D12;
+}
+::-webkit-scrollbar-thumb {
+  background: #1B2636;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #243348;
+}
+
+/* Keyframe animations for Tactical Radar and SOS pulses */
+@keyframes radar-sweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-radar-sweep {
+  animation: radar-sweep 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes tactical-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.05);
+  }
+}
+
+.animate-tactical-pulse {
+  animation: tactical-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes sos-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.4), inset 0 0 15px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(239, 68, 68, 0.8), inset 0 0 25px rgba(239, 68, 68, 0.5);
+  }
+}
+
+.animate-sos-glow {
+  animation: sos-glow 1.5s ease-in-out infinite;
+}

@@ -1,7 +1,0 @@
-<resources>
-    <string name="app_name">OffGrid Connect</string>
-    <string name="nav_nearby">Nearby</string>
-    <string name="nav_chats">Chats</string>
-    <string name="nav_sos">SOS Broadcast</string>
-    <string name="nav_settings">Settings</string>
-</resources>
