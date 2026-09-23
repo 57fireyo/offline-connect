@@ -83,6 +83,10 @@ class TacticalAudioService {
     }
   }
 
+  playEmergencySiren(): void {
+    this.playSosAlert();
+  }
+
   // Phone dialing ring
   playDialTone(): void {
     const ctx = this.getContext();

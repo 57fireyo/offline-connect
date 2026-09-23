@@ -50,6 +50,8 @@ export interface ContactEntity {
   avatarColorIndex: number;
   batteryPercent: number;
   isSimulatedDemo: boolean;
+  transportType?: 'BLUETOOTH' | 'WEBRTC' | 'MESH';
+  hardwareDeviceName?: string;
 }
 
 export interface MessageEntity {

@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { TacticalAvatar } from '../common/TacticalAvatar';
+import { p2pManager } from '../../services/p2pManager';
 import {
   Mic,
   MicOff,
@@ -11,13 +12,15 @@ import {
   VolumeX,
   SwitchCamera,
   Radio,
-  Lock
+  Lock,
+  PhoneCall
 } from 'lucide-react';
 
 export const CallScreen: React.FC = () => {
   const {
     callSession,
     endCall,
+    answerCall,
     toggleMute,
     toggleVideo,
     switchCamera,
@@ -25,6 +28,9 @@ export const CallScreen: React.FC = () => {
   } = useApp();
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
   const {
     active,
     peer,
@@ -38,26 +44,33 @@ export const CallScreen: React.FC = () => {
     isVoiceFallback
   } = callSession;
 
-  // Try to bind real user media if permitted, fallback to tactical HUD simulation
+  // Listen for remote WebRTC stream
   useEffect(() => {
-    let stream: MediaStream | null = null;
+    const unsub = p2pManager.onRemoteStream((_peerId, stream) => {
+      setRemoteStream(stream);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Bind local user media (camera/mic)
+  useEffect(() => {
     if (active && isVideoEnabled && !isVoiceFallback) {
-      navigator.mediaDevices?.getUserMedia({ video: true, audio: true })
+      p2pManager.getLocalMedia(true, true)
         .then(s => {
-          stream = s;
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = s;
           }
         })
-        .catch(() => {
-          // Camera permission denied or not available, HUD animation fallback
+        .catch(err => {
+          console.warn('Local media binding fallback:', err);
         });
     }
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
+      // Local tracks are stopped when call ends via p2pManager
     };
   }, [active, isVideoEnabled, isVoiceFallback]);
 
@@ -75,13 +88,9 @@ export const CallScreen: React.FC = () => {
     <div className="fixed inset-0 z-50 bg-[#090D12] text-[#F9FAFB] flex flex-col justify-between select-none overflow-hidden font-mono-tactical">
       {/* Tactical HUD Corner Brackets */}
       <div className="pointer-events-none absolute inset-4 border border-[#26354A]/30">
-        {/* Top-Left */}
         <div className="absolute -top-1 -left-1 w-6 h-6 border-t-2 border-l-2 border-[#F59E0B]" />
-        {/* Top-Right */}
         <div className="absolute -top-1 -right-1 w-6 h-6 border-t-2 border-r-2 border-[#F59E0B]" />
-        {/* Bottom-Left */}
         <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-2 border-l-2 border-[#F59E0B]" />
-        {/* Bottom-Right */}
         <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-2 border-r-2 border-[#F59E0B]" />
       </div>
 
@@ -98,26 +107,30 @@ export const CallScreen: React.FC = () => {
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-[15px] text-[#F9FAFB]">
+              <span className="font-bold text-[14px] text-[#F9FAFB] font-sans">
                 {peer.displayName}
               </span>
-              <span className="text-[11px] font-bold text-[#F59E0B] bg-[#F59E0B]/15 px-1.5 py-0.5 rounded-xs border border-[#F59E0B]/30">
+              <span className="text-[10px] text-[#F59E0B] font-bold bg-[#F59E0B]/10 px-1.5 py-0.5 rounded-xs border border-[#F59E0B]/30">
                 [{peer.callsign}]
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] text-[#9CA3AF] mt-0.5">
+            <div className="flex items-center gap-2 text-[11px] text-[#9CA3AF]">
               <span
-                className={
+                className={`font-bold ${
                   callState === 'CONNECTED'
-                    ? 'text-[#10B981] font-bold'
-                    : 'text-[#F59E0B] animate-pulse'
-                }
+                    ? 'text-[#10B981]'
+                    : callState === 'INCOMING'
+                    ? 'text-[#F59E0B] animate-pulse'
+                    : 'text-[#06B6D4] animate-pulse'
+                }`}
               >
                 {callState === 'CONNECTED'
                   ? isVoiceFallback
-                    ? 'VOICE FALLBACK (SRTP)'
+                    ? 'DIRECT VOICE LINK'
                     : 'P2P DIRECT STREAM (SRTP)'
+                  : callState === 'INCOMING'
+                  ? 'INCOMING RADIO TRANSMISSION...'
                   : 'CONNECTING PEER LINK...'}
               </span>
               {callState === 'CONNECTED' && (
@@ -162,27 +175,36 @@ export const CallScreen: React.FC = () => {
               }}
             />
 
-            {/* Remote Peer Stream or Tactical Field Rendering */}
-            <div className="flex flex-col items-center gap-4 z-10">
-              <div className="relative w-28 h-28 rounded-full bg-[#1B2636] border-2 border-[#10B981] flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.3)]">
-                <TacticalAvatar
-                  name={peer.displayName}
-                  callsign={peer.callsign}
-                  size={100}
-                  avatarColorIndex={peer.avatarColorIndex}
-                  isOnline={true}
-                />
-              </div>
+            {/* Remote Peer Stream or Tactical Field Avatar */}
+            {remoteStream ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-4 z-10">
+                <div className="relative w-28 h-28 rounded-full bg-[#1B2636] border-2 border-[#10B981] flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+                  <TacticalAvatar
+                    name={peer.displayName}
+                    callsign={peer.callsign}
+                    size={100}
+                    avatarColorIndex={peer.avatarColorIndex}
+                    isOnline={true}
+                  />
+                </div>
 
-              <div className="text-center">
-                <span className="text-[13px] font-bold text-[#F9FAFB] block">
-                  TRANSMITTING OVER WI-FI DIRECT / BLE
-                </span>
-                <span className="text-[11px] text-[#06B6D4]">
-                  RSSI: {peer.rssi} dBm • Latency: ~38ms • Loss: 0.0%
-                </span>
+                <div className="text-center">
+                  <span className="text-[13px] font-bold text-[#F9FAFB] block font-sans">
+                    TRANSMITTING OVER BLUETOOTH / WI-FI DIRECT
+                  </span>
+                  <span className="text-[11px] text-[#06B6D4]">
+                    RSSI: {peer.rssi} dBm • Latency: ~38ms • Loss: 0.0%
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* PIP Local Camera Preview (Bottom Right) */}
             <div className="absolute bottom-6 right-6 w-32 h-44 rounded-xl bg-[#111822] border-2 border-[#F59E0B] overflow-hidden shadow-2xl z-20 flex items-center justify-center">
@@ -213,7 +235,7 @@ export const CallScreen: React.FC = () => {
               <span className="text-[14px] font-bold text-[#F59E0B]">
                 ADAPTIVE VOICE-ONLY CHANNEL
               </span>
-              <span className="text-[11px] text-[#9CA3AF]">
+              <span className="text-[11px] text-[#9CA3AF] font-sans">
                 Conserving RF bandwidth • OPUS 48 kbps Low-Latency Codec
               </span>
             </div>
@@ -223,71 +245,96 @@ export const CallScreen: React.FC = () => {
 
       {/* Bottom Control Dock */}
       <div className="relative z-10 bg-[#111822]/95 backdrop-blur-md border-t border-[#26354A] p-5 flex items-center justify-center gap-4">
-        {/* Toggle Mute */}
-        <button
-          type="button"
-          onClick={toggleMute}
-          className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
-            isAudioMuted
-              ? 'bg-[#EF4444]/20 border-[#EF4444] text-[#EF4444]'
-              : 'bg-[#243348] border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56]'
-          }`}
-          title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
-        >
-          {isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-        </button>
+        {callState === 'INCOMING' ? (
+          <div className="flex items-center gap-6">
+            <button
+              type="button"
+              onClick={endCall}
+              className="w-14 h-14 rounded-full bg-[#EF4444] text-white flex items-center justify-center shadow-lg hover:bg-[#dc2626] transition-transform active:scale-95 cursor-pointer"
+              title="Decline"
+            >
+              <PhoneOff className="w-6 h-6" />
+            </button>
+            <button
+              type="button"
+              onClick={answerCall}
+              className="w-14 h-14 rounded-full bg-[#10B981] text-black flex items-center justify-center shadow-lg hover:bg-[#0ea372] transition-transform active:scale-95 animate-bounce cursor-pointer"
+              title="Answer"
+            >
+              <PhoneCall className="w-6 h-6" />
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Toggle Mute */}
+            <button
+              type="button"
+              onClick={toggleMute}
+              className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                isAudioMuted
+                  ? 'bg-[#EF4444]/20 border-[#EF4444] text-[#EF4444]'
+                  : 'bg-[#243348] border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56]'
+              }`}
+              title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
+            >
+              {isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
 
-        {/* Toggle Video / Fallback */}
-        <button
-          type="button"
-          onClick={toggleVideo}
-          className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
-            !isVideoEnabled || isVoiceFallback
-              ? 'bg-[#EF4444]/20 border-[#EF4444] text-[#EF4444]'
-              : 'bg-[#243348] border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56]'
-          }`}
-          title={isVideoEnabled ? 'Disable video (Voice fallback)' : 'Enable video'}
-        >
-          {!isVideoEnabled || isVoiceFallback ? (
-            <VideoOff className="w-5 h-5" />
-          ) : (
-            <VideoIcon className="w-5 h-5" />
-          )}
-        </button>
+            {/* Toggle Video / Fallback */}
+            <button
+              type="button"
+              onClick={toggleVideo}
+              className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                !isVideoEnabled || isVoiceFallback
+                  ? 'bg-[#EF4444]/20 border-[#EF4444] text-[#EF4444]'
+                  : 'bg-[#243348] border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56]'
+              }`}
+              title={isVideoEnabled ? 'Disable video (Voice fallback)' : 'Enable video'}
+            >
+              {!isVideoEnabled || isVoiceFallback ? (
+                <VideoOff className="w-5 h-5" />
+              ) : (
+                <VideoIcon className="w-5 h-5" />
+              )}
+            </button>
 
-        {/* End Call Button */}
-        <button
-          type="button"
-          onClick={endCall}
-          className="w-16 h-16 rounded-full bg-[#EF4444] hover:bg-[#dc2626] text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
-          title="Disconnect call"
-        >
-          <PhoneOff className="w-7 h-7" />
-        </button>
+            {/* Switch Camera */}
+            {!isVoiceFallback && isVideoEnabled && (
+              <button
+                type="button"
+                onClick={switchCamera}
+                className="w-13 h-13 rounded-full bg-[#243348] border border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56] flex items-center justify-center transition-all cursor-pointer"
+                title="Switch Camera (Front/Back)"
+              >
+                <SwitchCamera className="w-5 h-5" />
+              </button>
+            )}
 
-        {/* Switch Camera */}
-        <button
-          type="button"
-          onClick={switchCamera}
-          className="w-13 h-13 rounded-full bg-[#243348] border border-[#26354A] text-[#F9FAFB] hover:bg-[#2c3d56] flex items-center justify-center transition-all cursor-pointer"
-          title="Switch camera"
-        >
-          <SwitchCamera className="w-5 h-5" />
-        </button>
+            {/* Speakerphone Toggle */}
+            <button
+              type="button"
+              onClick={toggleSpeakerphone}
+              className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                isSpeakerphoneOn
+                  ? 'bg-[#06B6D4]/20 border-[#06B6D4] text-[#06B6D4]'
+                  : 'bg-[#243348] border-[#26354A] text-[#9CA3AF] hover:bg-[#2c3d56]'
+              }`}
+              title={isSpeakerphoneOn ? 'Speakerphone ON' : 'Earpiece Mode'}
+            >
+              {isSpeakerphoneOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            </button>
 
-        {/* Speakerphone */}
-        <button
-          type="button"
-          onClick={toggleSpeakerphone}
-          className={`w-13 h-13 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
-            isSpeakerphoneOn
-              ? 'bg-[#10B981]/20 border-[#10B981] text-[#10B981]'
-              : 'bg-[#243348] border-[#26354A] text-[#9CA3AF] hover:bg-[#2c3d56]'
-          }`}
-          title="Toggle speaker"
-        >
-          {isSpeakerphoneOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-        </button>
+            {/* Terminate Call */}
+            <button
+              type="button"
+              onClick={endCall}
+              className="w-14 h-14 rounded-full bg-[#EF4444] text-white flex items-center justify-center border border-[#EF4444] shadow-[0_0_20px_rgba(239,68,68,0.5)] hover:bg-[#dc2626] transition-all cursor-pointer"
+              title="Terminate Call"
+            >
+              <PhoneOff className="w-6 h-6" />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

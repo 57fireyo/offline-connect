@@ -67,6 +67,10 @@ export class CryptoManager {
     return this.exportedPublicKeyBase64;
   }
 
+  getExportedPublicKeyBase64(): string {
+    return this.exportedPublicKeyBase64;
+  }
+
   /**
    * Derive shared AES-256-GCM key from peer's ECDH public key
    */

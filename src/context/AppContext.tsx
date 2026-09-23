@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { cryptoManager } from '../crypto/cryptoManager';
 import { tacticalAudio } from '../services/audioService';
+import { p2pManager } from '../services/p2pManager';
 
 interface CallSessionState {
   active: boolean;
@@ -42,6 +43,7 @@ interface AppContextType {
   callSession: CallSessionState;
   conversations: ConversationSummary[];
   queuedCountTotal: number;
+  isBleModalOpen: boolean;
 
   // Actions
   setActiveTab: (tab: 'radar' | 'chats' | 'sos' | 'settings') => void;
@@ -60,6 +62,9 @@ interface AppContextType {
   clearChat: (peerId: string) => void;
   broadcastSos: (type: EmergencyType, urgency: UrgencyLevel, notes: string, lat?: number, lon?: number) => void;
   acknowledgeAlert: (alertId: string) => void;
+  openBleModal: () => void;
+  closeBleModal: () => void;
+  addDiscoveredBluetoothPeer: (device: { id: string; name: string; rssi: number }) => void;
 
   // Call actions
   startCall: (contact: ContactEntity, isVideo: boolean) => void;
@@ -84,11 +89,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // ignore
       }
     }
+    const randSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
     return {
-      peerId: 'NODE-7A1F4B',
-      displayName: 'Operator Alpha',
-      callsign: 'ECHO-7',
-      avatarColorIndex: 1,
+      peerId: `NODE-${randSuffix}`,
+      displayName: `Operator ${randSuffix}`,
+      callsign: `ECHO-${randSuffix.substring(0, 2)}`,
+      avatarColorIndex: Math.floor(Math.random() * 4),
       meshRelayEnabled: true,
       batterySaverEnabled: false
     };
@@ -98,6 +104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<'radar' | 'chats' | 'sos' | 'settings'>('radar');
   const [activeChatPeerId, setActiveChatPeerId] = useState<string | null>(null);
   const [verifyingContact, setVerifyingContact] = useState<ContactEntity | null>(null);
+  const [isBleModalOpen, setIsBleModalOpen] = useState<boolean>(false);
 
   // 3. Radio & Mesh State
   const [isScanning, setIsScanning] = useState<boolean>(true);
@@ -127,7 +134,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isVerified: true,
         avatarColorIndex: 2,
         batteryPercent: 92,
-        isSimulatedDemo: true
+        isSimulatedDemo: true,
+        transportType: 'WEBRTC'
       },
       {
         peerId: 'NODE-MEDIC-03',
@@ -141,7 +149,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isVerified: false,
         avatarColorIndex: 0,
         batteryPercent: 64,
-        isSimulatedDemo: true
+        isSimulatedDemo: true,
+        transportType: 'BLUETOOTH'
       },
       {
         peerId: 'NODE-BASE-09',
@@ -155,7 +164,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isVerified: true,
         avatarColorIndex: 3,
         batteryPercent: 100,
-        isSimulatedDemo: true
+        isSimulatedDemo: true,
+        transportType: 'MESH'
       }
     ];
   });
@@ -240,17 +250,132 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isVoiceFallback: false
   });
 
-  // Initialize WebCrypto
+  // Initialize WebCrypto & P2P Signaling
   useEffect(() => {
     cryptoManager.initialize().then(() => {
+      const pubKey = cryptoManager.getExportedPublicKeyBase64();
       const fingerprint = cryptoManager.getDeviceFingerprint();
+
       setUserProfile(prev => {
-        const updated = { ...prev, peerId: `NODE-${fingerprint}` };
+        const updated = {
+          ...prev,
+          peerId: prev.peerId.startsWith('NODE-') ? prev.peerId : `NODE-${fingerprint}`
+        };
         localStorage.setItem('offgrid_user_profile', JSON.stringify(updated));
+
+        // Initialize P2P manager with user profile
+        p2pManager.init(updated.peerId, {
+          displayName: updated.displayName,
+          callsign: updated.callsign,
+          avatarColorIndex: updated.avatarColorIndex,
+          publicKeyBase64: pubKey
+        });
+
         return updated;
       });
     });
   }, []);
+
+  // Listen for nearby peers discovered across radio frequencies / tabs / phones
+  useEffect(() => {
+    const unsubDiscovery = p2pManager.onPeerDiscovered((discovered) => {
+      setContacts(prev => {
+        const existingIdx = prev.findIndex(c => c.peerId === discovered.peerId);
+        if (existingIdx >= 0) {
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            connectionState: 'CONNECTED',
+            lastSeenTimestamp: Date.now(),
+            rssi: discovered.rssi || updated[existingIdx].rssi
+          };
+          return updated;
+        } else {
+          const newContact: ContactEntity = {
+            peerId: discovered.peerId,
+            displayName: discovered.displayName || `Phone Node`,
+            callsign: discovered.callsign || `ECHO-${discovered.peerId.substring(5, 7)}`,
+            publicKeyBase64: discovered.publicKeyBase64 || '',
+            connectionState: 'CONNECTED',
+            lastSeenTimestamp: Date.now(),
+            rssi: discovered.rssi || -56,
+            distanceEstimateMeters: 3.5,
+            isVerified: false,
+            avatarColorIndex: discovered.avatarColorIndex || 0,
+            batteryPercent: 85,
+            isSimulatedDemo: false,
+            transportType: 'WEBRTC'
+          };
+          tacticalAudio.playRogerBeep();
+          return [newContact, ...prev];
+        }
+      });
+    });
+
+    const unsubData = p2pManager.onDataMessage((senderId, payload) => {
+      if (payload && payload.content) {
+        tacticalAudio.playRogerBeep();
+        const incomingMsg: MessageEntity = {
+          id: 'msg-remote-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          chatPeerId: senderId,
+          senderId: senderId,
+          senderName: payload.senderName || 'Peer',
+          content: payload.content,
+          messageType: payload.messageType || 'TEXT',
+          attachmentData: payload.attachmentData,
+          fileName: payload.fileName,
+          fileSizeBytes: payload.attachmentData ? payload.attachmentData.length : 0,
+          timestamp: Date.now(),
+          status: 'DELIVERED'
+        };
+        setMessages(prev => [...prev, incomingMsg]);
+      }
+    });
+
+    const unsubCall = p2pManager.onCallStateChange((peerId, state, isVideo) => {
+      if (state === 'INCOMING') {
+        const peer = contacts.find(c => c.peerId === peerId) || {
+          peerId,
+          displayName: 'Incoming Radio Peer',
+          callsign: 'PEER-LINK',
+          publicKeyBase64: '',
+          connectionState: 'CONNECTED',
+          lastSeenTimestamp: Date.now(),
+          rssi: -50,
+          distanceEstimateMeters: 2.0,
+          isVerified: false,
+          avatarColorIndex: 1,
+          batteryPercent: 90,
+          isSimulatedDemo: false
+        };
+        tacticalAudio.playDialTone();
+        setCallSession({
+          active: true,
+          peer,
+          isVideo,
+          callState: 'INCOMING',
+          durationSeconds: 0,
+          isAudioMuted: false,
+          isVideoEnabled: isVideo,
+          isSpeakerphoneOn: true,
+          isFrontCamera: true,
+          bitrateKbps: 1200,
+          fps: 30,
+          isVoiceFallback: !isVideo
+        });
+      } else if (state === 'CONNECTED') {
+        setCallSession(prev => ({ ...prev, callState: 'CONNECTED' }));
+      } else if (state === 'ENDED') {
+        setCallSession(prev => ({ ...prev, active: false, callState: 'IDLE', peer: null }));
+      }
+    });
+
+    return () => {
+      unsubDiscovery();
+      unsubData();
+      unsubCall();
+    };
+  }, [contacts]);
 
   // Save changes to localStorage
   useEffect(() => {
@@ -269,6 +394,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!isScanning) return;
     const interval = setInterval(() => {
+      // Broadcast discovery ping periodically
+      p2pManager.broadcastPresence();
+
       setContacts(prev =>
         prev.map(c => {
           if (c.connectionState === 'CONNECTED' && c.isSimulatedDemo) {
@@ -336,7 +464,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (c.peerId === peerId) {
           const updated: ContactEntity = {
             ...c,
-            connectionState: 'CONNECTED',
+            connectionState: 'CONNECTING',
             lastSeenTimestamp: Date.now()
           };
           return updated;
@@ -344,8 +472,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return c;
       })
     );
-    // Flush store-and-forward queue
+
     setTimeout(() => {
+      setContacts(prev =>
+        prev.map(c => {
+          if (c.peerId === peerId) {
+            return {
+              ...c,
+              connectionState: 'CONNECTED',
+              lastSeenTimestamp: Date.now()
+            };
+          }
+          return c;
+        })
+      );
+      tacticalAudio.playRogerBeep();
       flushQueuedMessages(peerId);
     }, 500);
   }, [flushQueuedMessages]);
@@ -364,6 +505,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return c;
       })
     );
+  }, []);
+
+  // Add discovered native Bluetooth peer to contact list
+  const addDiscoveredBluetoothPeer = useCallback((device: { id: string; name: string; rssi: number }) => {
+    setContacts(prev => {
+      const existing = prev.find(c => c.peerId === device.id || c.hardwareDeviceName === device.name);
+      if (existing) {
+        return prev.map(c => c.peerId === existing.peerId ? { ...c, connectionState: 'CONNECTED', rssi: device.rssi } : c);
+      }
+      const newPeer: ContactEntity = {
+        peerId: `BT-${device.id.substring(0, 8)}`,
+        displayName: device.name || 'Bluetooth Node',
+        callsign: device.name.toUpperCase().substring(0, 8) || 'BT-PEER',
+        publicKeyBase64: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE' + Math.random().toString(36).substring(2, 10),
+        connectionState: 'CONNECTED',
+        lastSeenTimestamp: Date.now(),
+        rssi: device.rssi,
+        distanceEstimateMeters: 1.8,
+        isVerified: false,
+        avatarColorIndex: 2,
+        batteryPercent: 92,
+        isSimulatedDemo: false,
+        transportType: 'BLUETOOTH',
+        hardwareDeviceName: device.name
+      };
+      tacticalAudio.playRogerBeep();
+      return [newPeer, ...prev];
+    });
   }, []);
 
   // Send Message (with real store-and-forward queueing & demo simulation)
@@ -399,6 +568,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    // Try transmitting over real P2P / WebRTC / Broadcast mesh
+    p2pManager.sendChatMessage(peerId, {
+      content: text,
+      messageType: type,
+      attachmentData,
+      fileName,
+      senderName: userProfile.displayName
+    });
+
     // If online and in demo mode with simulated peers
     if (isDemoMode && contact?.isSimulatedDemo) {
       // Step 1: Delivered
@@ -429,11 +607,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (lower.includes('sos') || lower.includes('help') || lower.includes('emergency')) {
           replyContent = 'Ranger Sarah here. Distress message acknowledged. Drone reconnaissance has your grid. Keep radio open.';
         } else if (lower.includes('status') || lower.includes('check') || lower.includes('ping')) {
-          replyContent = 'Base Camp Echo reports all 4 repeaters online. Mesh link latency 42ms. Wi-Fi Direct channel 6 clear.';
+          replyContent = 'Base Camp Echo reports all repeaters online. Bluetooth & Wi-Fi Direct channels active.';
         } else if (lower.includes('call') || lower.includes('video') || lower.includes('voice')) {
-          replyContent = 'Ready on peer link. Tap the Video Call icon in the top right to start the P2P stream.';
+          replyContent = 'Ready on peer link. Tap the Video Call icon in the top right to start the direct stream.';
         } else if (attachmentData) {
-          replyContent = 'Tactical attachment received. Image decrypted cleanly with AES-256 session key. Analyzing terrain markers.';
+          replyContent = 'Tactical attachment received. Image decrypted cleanly with AES-256 session key.';
         }
 
         const replyMsg: MessageEntity = {
@@ -450,29 +628,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         setMessages(prev => [...prev, replyMsg]);
         tacticalAudio.playRogerBeep();
-      }, 2400);
+      }, 2500);
     }
   }, [contacts, userProfile, isDemoMode]);
 
-  // Mark all seen in peer conversation
   const markAllSeen = useCallback((peerId: string) => {
     setMessages(prev =>
-      prev.map(m => {
-        if (m.chatPeerId === peerId && m.senderId !== userProfile.peerId && m.status !== 'SEEN') {
-          return { ...m, status: 'SEEN' };
-        }
-        return m;
-      })
+      prev.map(m => (m.chatPeerId === peerId && m.status !== 'SEEN' ? { ...m, status: 'SEEN' } : m))
     );
-  }, [userProfile.peerId]);
-
-  // Clear chat history
-  const clearChat = useCallback((peerId: string) => {
-    setMessages(prev => prev.filter(m => m.chatPeerId !== peerId));
-    tacticalAudio.playTacticalClick();
   }, []);
 
-  // Broadcast SOS
+  const clearChat = useCallback((peerId: string) => {
+    tacticalAudio.playTacticalClick();
+    setMessages(prev => prev.filter(m => m.chatPeerId !== peerId));
+  }, []);
+
+  // Broadcast SOS distress beacon
   const broadcastSos = useCallback((
     type: EmergencyType,
     urgency: UrgencyLevel,
@@ -480,10 +651,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     lat: number = 36.5785,
     lon: number = -118.2923
   ) => {
-    tacticalAudio.playSosAlert();
-
+    tacticalAudio.playEmergencySiren();
     const alert: SosAlertEntity = {
-      id: 'sos-' + Date.now(),
+      id: 'sos-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       senderId: userProfile.peerId,
       senderName: userProfile.displayName,
       callsign: userProfile.callsign,
@@ -492,9 +662,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       urgencyLevel: urgency,
       latitude: lat,
       longitude: lon,
-      altitudeMeters: 2450.0,
-      notes: notes || 'Emergency distress signal broadcast over P2P mesh network.',
-      acknowledged: true
+      altitudeMeters: 3840.0,
+      notes,
+      acknowledged: false
     };
 
     setSosAlerts(prev => [alert, ...prev]);
@@ -556,6 +726,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         batterySaverEnabled: batterySaver
       };
       localStorage.setItem('offgrid_user_profile', JSON.stringify(updated));
+
+      // Re-announce presence on network with new callsign/name
+      p2pManager.init(updated.peerId, {
+        displayName: updated.displayName,
+        callsign: updated.callsign,
+        avatarColorIndex: updated.avatarColorIndex,
+        publicKeyBase64: cryptoManager.getExportedPublicKeyBase64()
+      });
+
       return updated;
     });
   }, []);
@@ -578,7 +757,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isVoiceFallback: !isVideo
     });
 
-    // In demo mode or local P2P, connect after 2 seconds
+    // Initiate WebRTC peer stream
+    p2pManager.startCall(contact.peerId, isVideo);
+
+    // In demo mode or simulated fallback, transition state
     setTimeout(() => {
       setCallSession(prev => {
         if (prev.active && prev.callState === 'OUTGOING') {
@@ -590,18 +772,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 2000);
   }, []);
 
+  const answerCall = useCallback(() => {
+    tacticalAudio.playTacticalClick();
+    if (callSession.peer) {
+      p2pManager.answerCall(callSession.peer.peerId, callSession.isVideo);
+    }
+    setCallSession(prev => ({ ...prev, callState: 'CONNECTED' }));
+  }, [callSession.peer, callSession.isVideo]);
+
   const endCall = useCallback(() => {
     tacticalAudio.playTacticalClick();
+    if (callSession.peer) {
+      p2pManager.endCall(callSession.peer.peerId);
+    }
     setCallSession(prev => ({ ...prev, callState: 'ENDED' }));
     setTimeout(() => {
       setCallSession(prev => ({ ...prev, active: false, callState: 'IDLE', peer: null }));
     }, 800);
-  }, []);
-
-  const answerCall = useCallback(() => {
-    tacticalAudio.playRogerBeep();
-    setCallSession(prev => ({ ...prev, callState: 'CONNECTED' }));
-  }, []);
+  }, [callSession.peer]);
 
   const toggleMute = useCallback(() => {
     tacticalAudio.playTacticalClick();
@@ -611,11 +799,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleVideo = useCallback(() => {
     tacticalAudio.playTacticalClick();
     setCallSession(prev => {
-      const nextVideo = !prev.isVideoEnabled;
+      const nextVideoState = !prev.isVideoEnabled;
       return {
         ...prev,
-        isVideoEnabled: nextVideo,
-        isVoiceFallback: !nextVideo
+        isVideoEnabled: nextVideoState,
+        isVoiceFallback: !nextVideoState
       };
     });
   }, []);
@@ -654,12 +842,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const toggleScan = useCallback(() => {
     tacticalAudio.playTacticalClick();
-    setIsScanning(prev => !prev);
+    setIsScanning(prev => {
+      const next = !prev;
+      if (next) {
+        p2pManager.broadcastPresence();
+      }
+      return next;
+    });
   }, []);
 
   const toggleDemoMode = useCallback(() => {
     tacticalAudio.playTacticalClick();
     setIsDemoMode(prev => !prev);
+  }, []);
+
+  const openBleModal = useCallback(() => {
+    tacticalAudio.playTacticalClick();
+    setIsBleModalOpen(true);
+  }, []);
+
+  const closeBleModal = useCallback(() => {
+    setIsBleModalOpen(false);
   }, []);
 
   // Compute conversation summaries
@@ -695,6 +898,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         callSession,
         conversations,
         queuedCountTotal,
+        isBleModalOpen,
         setActiveTab,
         openChat,
         closeChat,
@@ -711,6 +915,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearChat,
         broadcastSos,
         acknowledgeAlert,
+        openBleModal,
+        closeBleModal,
+        addDiscoveredBluetoothPeer,
         startCall,
         endCall,
         answerCall,
