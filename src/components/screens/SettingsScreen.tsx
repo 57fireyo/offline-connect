@@ -1,22 +1,18 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { TacticalAvatar } from '../common/TacticalAvatar';
 import {
+  User,
   Shield,
   Radio,
-  BatteryCharging,
   Cpu,
+  BatteryCharging,
   Check,
-  Smartphone
+  Smartphone,
+  Copy
 } from 'lucide-react';
 
 export const SettingsScreen: React.FC = () => {
-  const {
-    userProfile,
-    updateProfile,
-    isDemoMode,
-    toggleDemoMode
-  } = useApp();
+  const { userProfile, updateProfile, myRealPeerId } = useApp();
 
   const [displayName, setDisplayName] = useState(userProfile.displayName);
   const [callsign, setCallsign] = useState(userProfile.callsign);
@@ -24,51 +20,65 @@ export const SettingsScreen: React.FC = () => {
   const [meshRelay, setMeshRelay] = useState(userProfile.meshRelayEnabled);
   const [batterySaver, setBatterySaver] = useState(userProfile.batterySaverEnabled);
   const [isSaved, setIsSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
     updateProfile(displayName, callsign, avatarIndex, meshRelay, batterySaver);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2500);
   };
 
+  const copyMyCode = () => {
+    navigator.clipboard.writeText(myRealPeerId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const avatarColorOptions = [
-    { label: 'Tactical Green', color: '#10B981', bg: '#064E3B' },
-    { label: 'Emergency Amber', color: '#F59E0B', bg: '#78350F' },
-    { label: 'Radio Cyan', color: '#06B6D4', bg: '#164E63' },
-    { label: 'Distress Red', color: '#EF4444', bg: '#7F1D1D' }
+    { color: '#EF4444', label: 'Crimson' },
+    { color: '#3B82F6', label: 'Cobalt' },
+    { color: '#10B981', label: 'Emerald' },
+    { color: '#F59E0B', label: 'Amber' }
   ];
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 py-4 pb-28 flex flex-col gap-4">
-      <span className="font-mono-tactical text-[11px] font-bold text-[#9CA3AF] uppercase tracking-wider">
-        OPERATOR PROFILE & SETTINGS
-      </span>
-
-      {/* 1. Operator Identity Card */}
-      <div className="w-full rounded-2xl bg-[#111822] border border-[#26354A] p-4.5 flex flex-col gap-4 shadow-md">
-        <div className="flex items-center gap-3.5">
-          <TacticalAvatar
-            name={displayName || 'Operator'}
-            callsign={callsign}
-            size={56}
-            avatarColorIndex={avatarIndex}
-            isOnline={true}
-          />
-
+    <div className="w-full max-w-2xl mx-auto px-4 py-4 pb-28 flex flex-col gap-4 font-mono-tactical">
+      {/* 1. Device Node ID Card */}
+      <div className="w-full rounded-2xl bg-gradient-to-r from-[#0E1A29] to-[#142336] border border-[#06B6D4]/40 p-4.5 flex items-center justify-between gap-3 shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#06B6D4]/20 border border-[#06B6D4]/50 flex items-center justify-center text-[#06B6D4] shrink-0">
+            <Smartphone className="w-5 h-5" />
+          </div>
           <div>
-            <span className="text-[14px] font-bold text-[#F9FAFB] block">
-              Local Node Identity
-            </span>
-            <span className="font-mono-tactical text-[12px] text-[#10B981]">
-              {userProfile.peerId}
-            </span>
+            <span className="text-[11px] text-[#9CA3AF] uppercase block">This Phone's Direct P2P ID</span>
+            <span className="text-[16px] font-black text-[#F59E0B] tracking-wider">{myRealPeerId}</span>
           </div>
         </div>
 
-        {/* Name input */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-mono-tactical font-bold text-[#9CA3AF]">
-            Operator Name
+        <button
+          type="button"
+          onClick={copyMyCode}
+          className="px-3.5 py-2 rounded-xl bg-[#1B2636] hover:bg-[#26354A] border border-[#26354A] text-[11px] font-bold text-[#F9FAFB] flex items-center gap-1.5 cursor-pointer"
+        >
+          {copied ? <Check className="w-4 h-4 text-[#10B981]" /> : <Copy className="w-4 h-4" />}
+          <span>{copied ? 'Copied!' : 'Copy ID'}</span>
+        </button>
+      </div>
+
+      {/* 2. Operator Identity Card */}
+      <form onSubmit={handleSave} className="w-full rounded-2xl bg-[#111822] border border-[#26354A] p-4.5 flex flex-col gap-4 shadow-md">
+        <div className="flex items-center gap-2 text-[#F59E0B] pb-1 border-b border-[#26354A]/60">
+          <User className="w-4 h-4" />
+          <span className="text-[11px] font-bold tracking-wider uppercase">
+            OPERATOR IDENTITY
+          </span>
+        </div>
+
+        {/* Display Name Input */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] font-bold text-[#9CA3AF]">
+            Phone Display Name
           </label>
           <input
             type="text"
@@ -77,14 +87,16 @@ export const SettingsScreen: React.FC = () => {
               setDisplayName(e.target.value);
               setIsSaved(false);
             }}
-            className="w-full bg-[#1B2636] border border-[#26354A] rounded-xl px-3.5 py-2.5 text-[13px] text-[#F9FAFB] focus:outline-none focus:border-[#F59E0B] transition-colors"
+            placeholder="e.g. My Phone / Your Name"
+            maxLength={32}
+            className="w-full bg-[#1B2636] border border-[#26354A] rounded-xl px-3.5 py-2.5 text-[13px] text-[#F9FAFB] focus:outline-none focus:border-[#F59E0B] font-sans"
           />
         </div>
 
-        {/* Callsign input */}
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-mono-tactical font-bold text-[#9CA3AF]">
-            Field Tactical Callsign
+        {/* Callsign Input */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] font-bold text-[#9CA3AF]">
+            Short Callsign Tag
           </label>
           <input
             type="text"
@@ -93,14 +105,16 @@ export const SettingsScreen: React.FC = () => {
               setCallsign(e.target.value.toUpperCase());
               setIsSaved(false);
             }}
-            className="w-full bg-[#1B2636] border border-[#26354A] rounded-xl px-3.5 py-2.5 text-[13px] font-mono-tactical text-[#F59E0B] focus:outline-none focus:border-[#F59E0B] transition-colors uppercase tracking-wider"
+            placeholder="e.g. ECHO-1"
+            maxLength={12}
+            className="w-full bg-[#1B2636] border border-[#26354A] rounded-xl px-3.5 py-2.5 text-[13px] text-[#F9FAFB] focus:outline-none focus:border-[#F59E0B]"
           />
         </div>
 
         {/* Avatar Color Selector */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] font-mono-tactical font-bold text-[#9CA3AF]">
-            Tactical Color Scheme
+          <label className="text-[11px] font-bold text-[#9CA3AF]">
+            Avatar Color Scheme
           </label>
           <div className="flex items-center gap-2">
             {avatarColorOptions.map((opt, idx) => (
@@ -123,9 +137,8 @@ export const SettingsScreen: React.FC = () => {
 
         {/* Save Button */}
         <button
-          type="button"
-          onClick={handleSave}
-          className="w-full py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#d98b08] text-black font-mono-tactical text-[12px] font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+          type="submit"
+          className="w-full py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#d98b08] text-black text-[12px] font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
           {isSaved ? (
             <>
@@ -136,13 +149,13 @@ export const SettingsScreen: React.FC = () => {
             <span>SAVE PROFILE</span>
           )}
         </button>
-      </div>
+      </form>
 
-      {/* 2. Mesh Network Configuration Card */}
+      {/* 3. Hardware & Radio Protocols */}
       <div className="w-full rounded-2xl bg-[#111822] border border-[#26354A] p-4.5 flex flex-col gap-4 shadow-md">
         <div className="flex items-center gap-2 text-[#06B6D4] pb-1 border-b border-[#26354A]/60">
           <Radio className="w-4 h-4" />
-          <span className="font-mono-tactical text-[11px] font-bold tracking-wider uppercase">
+          <span className="text-[11px] font-bold tracking-wider uppercase">
             MESH & RADIO PROTOCOLS
           </span>
         </div>
@@ -153,10 +166,10 @@ export const SettingsScreen: React.FC = () => {
             <Cpu className="w-5 h-5 text-[#06B6D4] shrink-0 mt-0.5" />
             <div>
               <span className="text-[13px] font-bold text-[#F9FAFB] block">
-                Multi-Hop Mesh Relay
+                Direct P2P Relay
               </span>
-              <span className="text-[11px] text-[#9CA3AF] leading-relaxed">
-                Forward encrypted packets between out-of-range peers (A ➔ B ➔ C)
+              <span className="text-[11px] text-[#9CA3AF] leading-relaxed font-sans">
+                Real-time WebRTC socket link between phones
               </span>
             </div>
           </div>
@@ -186,10 +199,10 @@ export const SettingsScreen: React.FC = () => {
             <BatteryCharging className="w-5 h-5 text-[#F59E0B] shrink-0 mt-0.5" />
             <div>
               <span className="text-[13px] font-bold text-[#F9FAFB] block">
-                Battery-Aware Mode
+                Battery Saver Mode
               </span>
-              <span className="text-[11px] text-[#9CA3AF] leading-relaxed">
-                Throttle scanning frequency when device battery drops below 20%
+              <span className="text-[11px] text-[#9CA3AF] leading-relaxed font-sans">
+                Throttle background radio pinging when device battery is low
               </span>
             </div>
           </div>
@@ -212,51 +225,22 @@ export const SettingsScreen: React.FC = () => {
             />
           </button>
         </div>
-
-        {/* Single-Device Demo Simulator */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <Smartphone className="w-5 h-5 text-[#10B981] shrink-0 mt-0.5" />
-            <div>
-              <span className="text-[13px] font-bold text-[#F9FAFB] block">
-                Demo Mode Simulator
-              </span>
-              <span className="text-[11px] text-[#9CA3AF] leading-relaxed">
-                Simulate peer responses (Ranger Sarah & Medic Dave) for testing
-              </span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={toggleDemoMode}
-            className={`w-12 h-6 rounded-full p-0.5 transition-colors cursor-pointer shrink-0 ${
-              isDemoMode ? 'bg-[#10B981]' : 'bg-[#243348]'
-            }`}
-          >
-            <div
-              className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                isDemoMode ? 'translate-x-6' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
       </div>
 
-      {/* 3. Hardware Keystore & Zero-Cloud Security Specs */}
+      {/* 4. Hardware Keystore & Zero-Cloud Security Specs */}
       <div className="w-full rounded-2xl bg-[#1B2636] border border-[#26354A] p-4.5 flex flex-col gap-3 shadow-md">
         <div className="flex items-center gap-2 text-[#10B981] pb-1 border-b border-[#26354A]/60">
           <Shield className="w-4 h-4" />
-          <span className="font-mono-tactical text-[11px] font-bold tracking-wider uppercase">
-            AIR-GAPPED & ZERO-CLOUD ARCHITECTURE
+          <span className="text-[11px] font-bold tracking-wider uppercase">
+            ZERO-SERVER REAL PHONE-TO-PHONE PROTOCOL
           </span>
         </div>
 
-        <ul className="text-[12px] text-[#9CA3AF] flex flex-col gap-1.5 list-disc list-inside leading-relaxed">
-          <li>Keys generated inside hardware-backed WebCrypto / Android KeyStore</li>
-          <li>E2EE via ECDH P-256 and AES-256-GCM authenticated cipher</li>
-          <li>Audio/Video encrypted over SRTP with WebRTC P2P direct socket</li>
-          <li>Zero cloud dependency — all packets remain strictly peer-to-peer</li>
+        <ul className="text-[12px] text-[#9CA3AF] flex flex-col gap-1.5 list-disc list-inside leading-relaxed font-sans">
+          <li>Browser Web Bluetooth API scans native BLE peripheral devices</li>
+          <li>Direct WebRTC P2P DataChannel for WhatsApp-like instant text & photo sharing</li>
+          <li>Real audio/video camera feed directly between two physical phones</li>
+          <li>Zero chat logs stored on any cloud server — 100% peer-to-peer</li>
         </ul>
       </div>
     </div>

@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Radio, Lock, Battery } from 'lucide-react';
 
 export const TacticalHeader: React.FC = () => {
-  const { userProfile, activeTab, isDemoMode } = useApp();
+  const { userProfile, activeTab } = useApp();
   const [timeUtc, setTimeUtc] = useState<string>('');
 
   useEffect(() => {
@@ -39,11 +39,6 @@ export const TacticalHeader: React.FC = () => {
               <span className="font-mono-tactical font-black text-[13px] tracking-wider text-[#F9FAFB]">
                 OFFGRID CONNECT
               </span>
-              {isDemoMode && (
-                <span className="text-[9px] font-mono-tactical px-1.5 py-0.2 bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40 rounded-xs">
-                  SIM
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2 text-[10px] font-mono-tactical text-[#9CA3AF]">
               <span className="text-[#F59E0B] font-semibold">{userProfile.callsign}</span>
